@@ -37,3 +37,8 @@ next-env.d.ts
 /outputs/
 /work/
 *.tsbuildinfo
+/backend/.venv/
+/backend/work/
+**/__pycache__/
+.pytest_cache/
+!/\.env.example
