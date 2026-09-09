@@ -23,6 +23,10 @@ def check_version(a: Assessment, revision: str | None):
 def view(db,a):
     db.flush()
     return assessment_view(db,a)
+@router.get('/health')
+def health_check():
+    return {'status': 'ok', 'service': 'bidguard', 'version': '2.0.0'}
+
 @router.get('/settings')
 def config(user:USER):return {'user':user.user_id,'role':user.role,'ai_configured':bool(settings.llm_url and settings.llm_api_key),'extractor':'Structured rule-based fallback','ocr':'Adapter available; OCR not enabled','database':'PostgreSQL' if settings.database_url.startswith('postgres') else 'SQLite local development','document_formats':['PDF','TXT'],'max_upload_mb':10,'max_pages':100}
 @router.get('/assessments')
