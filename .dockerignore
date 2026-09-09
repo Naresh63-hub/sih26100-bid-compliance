@@ -1,0 +1,52 @@
+# Git and IDE
+.git
+.gitignore
+.gemini
+.idea
+.vscode
+*.swp
+*.swo
+
+# Node & Frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.next/
+.vinext/
+.wrangler/
+dist/
+build/
+tsconfig.tsbuildinfo
+
+# Python & Backend
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.venv/
+env/
+venv/
+ENV/
+backend/work/
+backend/backend/
+*.db
+*.sqlite
+*.sqlite3
+
+# Scratch, logs & artifacts
+scratch/
+outputs/
+*.log
+
+# Sensitive secrets & local environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
