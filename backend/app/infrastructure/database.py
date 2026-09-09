@@ -110,7 +110,11 @@ class AuditLog(Base):
     previous_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     new_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-engine = create_engine(settings.database_url, connect_args={'check_same_thread': False} if settings.database_url.startswith('sqlite') else {}, pool_pre_ping=True)
+db_url = settings.database_url
+if db_url.startswith('postgresql://'):
+    db_url = db_url.replace('postgresql://', 'postgresql+psycopg://', 1)
+
+engine = create_engine(db_url, connect_args={'check_same_thread': False} if db_url.startswith('sqlite') else {}, pool_pre_ping=True)
 if settings.database_url.startswith('sqlite'):
     @event.listens_for(engine, 'connect')
     def enable_foreign_keys(connection, _):
