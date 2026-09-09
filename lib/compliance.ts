@@ -157,7 +157,15 @@ export function evaluate(requirements: Requirement[], documents: EvidenceDocumen
     let confidence = 0.95;
     const entityDetails: Record<string, string> = {};
 
-    const keyword = new RegExp('\\b' + escapeRegex(requirement.key) + '\\b', 'i');
+    let keywordPattern = '\\b' + escapeRegex(requirement.key) + '\\b';
+    if (requirement.key.toLowerCase() === 'gst') {
+      keywordPattern = '\\b(gst|gstin)\\b';
+    } else if (requirement.key.toLowerCase() === 'pan') {
+      keywordPattern = '\\b(pan|permanent account number)\\b';
+    } else if (requirement.key.toLowerCase() === 'udyam' || requirement.key.toLowerCase() === 'msme') {
+      keywordPattern = '\\b(udyam|msme|udyoga)\\b';
+    }
+    const keyword = new RegExp(keywordPattern, 'i');
 
     for (const doc of documents.filter(d => d.role === 'bid')) {
       doc.pages.forEach((page, index) => {
@@ -171,18 +179,20 @@ export function evaluate(requirements: Requirement[], documents: EvidenceDocumen
 
           // 1. Numeric Minimum Check
           if (requirement.kind === 'minimum') {
+            const hasHedging = /\b(not|estimated|approximately|proposed|up to|disputed|unverified)\b/i.test(line);
             const pattern = new RegExp(
-              '^(?:relevant |annual |minimum |total )?' +
+              '(?:relevant |average |annual |minimum |total |past )?' +
                 escapeRegex(requirement.key) +
-                '\\s*[:=]\\s*(?:₹\\s*)?(\\d+(?:\\.\\d+)?)\\s*' +
+                '[^\n-]*?[:=]?\\s*(?:₹|INR|Rs\\.?\\s*)?(-?\\d+(?:\\.\\d+)?)\\s*' +
                 escapeRegex(requirement.unit) +
-                '\\s*[.;]?\\s*$',
+                '(?:\\b|[.;]|$)',
               'i'
             );
             const match = line.match(pattern);
-            if (match && !/\b(not|estimated|approximately|proposed|up to|disputed|unverified)\b/i.test(line)) {
-              values.push(Number(match[1]));
-            } else {
+            const num = match ? Number(match[1]) : NaN;
+            if (match && !hasHedging && !isNaN(num) && num >= 0 && !line.includes(`-${match[1]}`)) {
+              values.push(num);
+            } else if (hasHedging || !match || num < 0) {
               ambiguous = true;
               confidence = 0.65;
             }
@@ -190,18 +200,20 @@ export function evaluate(requirements: Requirement[], documents: EvidenceDocumen
 
           // 2. Numeric Maximum Check
           if (requirement.kind === 'maximum') {
+            const hasHedging = /\b(not|estimated|approximately|proposed|up to|disputed)\b/i.test(line);
             const pattern = new RegExp(
-              '^(?:maximum |delivery |lead time )?' +
+              '(?:maximum |delivery |lead time )?' +
                 escapeRegex(requirement.key) +
-                '\\s*[:=]\\s*(\\d+(?:\\.\\d+)?)\\s*' +
+                '[^\n-]*?[:=]?\\s*(-?\\d+(?:\\.\\d+)?)\\s*' +
                 escapeRegex(requirement.unit) +
-                '\\s*[.;]?\\s*$',
+                '(?:\\b|[.;]|$)',
               'i'
             );
             const match = line.match(pattern);
-            if (match && !/\b(not|estimated|approximately|proposed)\b/i.test(line)) {
-              values.push(Number(match[1]));
-            } else {
+            const num = match ? Number(match[1]) : NaN;
+            if (match && !hasHedging && !isNaN(num) && num >= 0 && !line.includes(`-${match[1]}`)) {
+              values.push(num);
+            } else if (hasHedging || !match || num < 0) {
               ambiguous = true;
               confidence = 0.65;
             }

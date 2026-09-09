@@ -119,3 +119,109 @@ test('unsupported and empty uploads fail gracefully', async () => {
   await assert.rejects(readDocument(new File(['text'], 'bid.exe'), 'bid'), /PDF or/);
   await assert.rejects(readDocument(new File(['   '], 'bid.txt'), 'bid'), /No readable text/);
 });
+
+test('realistic multi-requirement procurement scenario derived dynamically from documents', () => {
+  const requirements = [
+    {
+      id: 'req-exp',
+      title: 'Past Experience',
+      category: 'Experience',
+      key: 'experience',
+      minimum: 5,
+      unit: 'years',
+      kind: 'minimum' as const,
+      source: 'Clause 4.1',
+      page: 1,
+      weight: 20,
+      mandatory: true
+    },
+    {
+      id: 'req-turnover',
+      title: 'Annual Turnover',
+      category: 'Financial',
+      key: 'turnover',
+      minimum: 10,
+      unit: 'crore',
+      kind: 'minimum' as const,
+      source: 'Clause 4.2',
+      page: 1,
+      weight: 25,
+      mandatory: true
+    },
+    {
+      id: 'req-gst',
+      title: 'GST Registration',
+      category: 'Statutory',
+      key: 'gst',
+      unit: 'registration',
+      kind: 'portal' as const,
+      source: 'Clause 5.1',
+      page: 2,
+      weight: 15,
+      mandatory: true
+    },
+    {
+      id: 'req-iso',
+      title: 'ISO 9001 Quality Certificate',
+      category: 'Certifications',
+      key: 'iso',
+      unit: 'validity',
+      kind: 'expiry' as const,
+      requiredDate: '2026-12-31',
+      source: 'Clause 6.3',
+      page: 3,
+      weight: 15,
+      mandatory: true
+    },
+    {
+      id: 'req-tech',
+      title: 'Technical Compliance Specification',
+      category: 'Technical',
+      key: 'technical',
+      unit: 'clause',
+      kind: 'manual' as const,
+      source: 'Clause 7.1',
+      page: 4,
+      weight: 25,
+      mandatory: true
+    }
+  ];
+
+  const bidderDocs = [
+    doc('Relevant experience: 7 years in industrial plant engineering.', 'bid', 'Experience_Cert.txt'),
+    doc('Average annual turnover: 12 crore in audited statements.', 'bid', 'Audited_Financials.txt'),
+    doc('GSTIN: 27AABCU9603R1ZM (Active)', 'bid', 'GST_Certificate.txt'),
+    doc('ISO 9001:2015 valid until 2020-05-15 (EXPIRED)', 'bid', 'ISO_Certificate.txt'),
+    doc('Technical specification compliance is subject to client clarifications.', 'bid', 'Tech_Proposal.txt')
+  ];
+
+  const results = evaluate(requirements, bidderDocs);
+
+  // 1. Experience (7 >= 5) -> Compliant
+  assert.equal(results[0].status, 'Compliant');
+  assert.match(results[0].calculation!, /7 years >= 5 years/);
+
+  // 2. Turnover (12 >= 10) -> Compliant
+  assert.equal(results[1].status, 'Compliant');
+  assert.match(results[1].calculation!, /12 crore >= 10 crore/);
+
+  // 3. GST (Present -> Needs review / live portal check required)
+  assert.equal(results[2].status, 'Needs review');
+  assert.match(results[2].reason, /official registry verification required/i);
+
+  // 4. ISO (Expired: 2020-05-15 < 2026-12-31) -> Non-compliant
+  assert.equal(results[3].status, 'Non-compliant');
+  assert.match(results[3].calculation!, /2020-05-15 >= 2026-12-31 -> FALSE/);
+
+  // 5. Technical (Manual clause) -> Needs review / officer interpretation
+  assert.equal(results[4].status, 'Needs review');
+  assert.equal(results[4].calculation, 'MANUAL_INTERPRETATION');
+
+  // Summary risk calculation
+  const summary = summarize(results, bidderDocs);
+  assert.equal(summary.total, 5);
+  assert.equal(summary.pass, 2);
+  assert.equal(summary.fail, 1);
+  assert.equal(summary.review, 2);
+});
+
