@@ -31,7 +31,9 @@ import {
   Scale,
   Building2,
   Trash2,
-  ExternalLink
+  ExternalLink,
+  Sparkles,
+  Users
 } from 'lucide-react';
 import {
   evaluate,
@@ -44,7 +46,7 @@ import {
 } from '../lib/compliance';
 import {
   initialWorkspaceStore,
-  createSampleAssessment,
+  createSampleAssessments,
   addAuditToAssessment,
   invalidateAssessment,
   type WorkspaceStore,
@@ -63,7 +65,15 @@ const assessmentTabs: { name: AssessmentTab; icon: typeof ListChecks }[] = [
   { name: 'Report', icon: FileSpreadsheet }
 ];
 
-const statuses: Status[] = ['Compliant', 'Non-compliant', 'Needs review'];
+const allStatuses: Status[] = [
+  'Compliant',
+  'Partial',
+  'Non-compliant',
+  'Missing evidence',
+  'Not applicable',
+  'Needs review'
+];
+
 const statusClass = (s: string) => s.toLowerCase().replaceAll(' ', '-');
 
 function StatusBadge({ status }: { status: Status }) {
@@ -71,8 +81,14 @@ function StatusBadge({ status }: { status: Status }) {
     <span className={'status ' + statusClass(status)}>
       {status === 'Compliant' ? (
         <Check size={13} />
+      ) : status === 'Partial' ? (
+        <Scale size={13} />
       ) : status === 'Non-compliant' ? (
         <XCircle size={13} />
+      ) : status === 'Missing evidence' ? (
+        <AlertCircle size={13} />
+      ) : status === 'Not applicable' ? (
+        <HelpCircle size={13} />
       ) : (
         <AlertTriangle size={13} />
       )}
@@ -157,7 +173,7 @@ export default function Bidguard() {
   const [busy, setBusy] = useState(false);
 
   // Modals & Source Viewer
-  const [modal, setModal] = useState<'decision' | 'report' | null>(null);
+  const [modal, setModal] = useState<'decision' | 'report' | 'compare' | null>(null);
   const [source, setSource] = useState<{ doc: EvidenceDocument; page: number; quote?: string } | null>(null);
   const [editReq, setEditReq] = useState<Requirement | null>(null);
 
@@ -186,29 +202,6 @@ export default function Bidguard() {
         const val = JSON.parse(raw);
         if (val.version === 2 && Array.isArray(val.assessments) && val.assessments.length > 0) {
           setStore(val);
-        }
-      } else {
-        // Fallback for v1 data migration
-        const oldV1 = localStorage.getItem('bidguard-workspace-v1');
-        if (oldV1) {
-          const v1Val = JSON.parse(oldV1);
-          if (v1Val.version === 1) {
-            const migrated: Assessment = {
-              id: 'BG-2026-014',
-              name: v1Val.name || 'Industrial Pump Supply & Commissioning',
-              bidder: v1Val.bidder || 'Vayuna Engineering Pvt. Ltd.',
-              procuringEntity: 'South Coast Process Utilities (PSU / MoPNG)',
-              status: v1Val.decision?.status?.includes('Qualified') ? 'Compliant' : 'In Review',
-              lastAnalyzed: new Date().toISOString(),
-              sample: v1Val.sample ?? true,
-              requirements: v1Val.requirements || [],
-              documents: v1Val.documents || [],
-              reviews: v1Val.reviews || {},
-              audit: v1Val.audit || [],
-              decision: v1Val.decision
-            };
-            setStore({ version: 2, activeAssessmentId: migrated.id, assessments: [migrated] });
-          }
         }
       }
     } catch {
@@ -239,8 +232,11 @@ export default function Bidguard() {
       return {
         total: 0,
         pass: 0,
+        partial: 0,
         fail: 0,
+        missing: 0,
         review: 0,
+        notApplicable: 0,
         compliancePercentage: 0,
         riskScore: 0,
         riskLevel: 'Low',
@@ -540,10 +536,10 @@ export default function Bidguard() {
           {/* TOPBAR */}
           <header className="topbar">
             <div>
-              <span>BIDGUARD</span>
+              <span>BIDGUARD AI</span>
               <ChevronRight size={14} />
               {view === 'assessments' && <b>Procurement Assessments Dashboard</b>}
-              {view === 'new-assessment' && <b>Guided Assessment Wizard</b>}
+              {view === 'new-assessment' && <b>Guided Assessment Creation Wizard</b>}
               {view === 'settings' && <b>System & Evaluation Settings</b>}
               {view === 'assessment-detail' && (
                 <>
@@ -552,12 +548,25 @@ export default function Bidguard() {
                   </button>
                   <ChevronRight size={14} />
                   <b>{activeAssessment?.id}</b>
+                  <ChevronRight size={14} />
+                  <span style={{ color: '#20322e', fontWeight: 600 }}>{activeAssessment?.bidder}</span>
                 </>
               )}
             </div>
-            <div className="demo-badge">
-              <i />
-              {activeAssessment?.sample ? 'FICTIONAL PSU DEMO' : 'LOCAL WORKSPACE'}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              {view === 'assessment-detail' && (
+                <button
+                  className="button"
+                  style={{ padding: '6px 10px', fontSize: 11 }}
+                  onClick={() => setModal('compare')}
+                >
+                  <Users size={14} /> Compare Bidders
+                </button>
+              )}
+              <div className="demo-badge">
+                <i />
+                {activeAssessment?.sample ? 'FICTIONAL PSU DEMO' : 'LOCAL WORKSPACE'}
+              </div>
             </div>
           </header>
 
@@ -587,7 +596,7 @@ export default function Bidguard() {
                   <div>
                     <p className="eyebrow">PROCUREMENT ASSESSMENTS</p>
                     <h1>Review Tenders & Bidder Compliance</h1>
-                    <p>Evidence-first compliance analysis for Indian Government & PSU tenders</p>
+                    <p>Evidence-first compliance analysis for Indian Government & PSU tenders (GeM Procurement)</p>
                   </div>
                   <div className="toolbar">
                     <button
@@ -609,9 +618,9 @@ export default function Bidguard() {
                     <p>Active procurement cases</p>
                   </div>
                   <div>
-                    <small>Active Tender Bids</small>
+                    <small>Active Bid Documents</small>
                     <strong>{store.assessments.reduce((sum, a) => sum + a.documents.filter(d => d.role === 'bid').length, 0)}</strong>
-                    <p>Bidder documents processed</p>
+                    <p>Submissions processed</p>
                   </div>
                   <div>
                     <small>Total Requirements</small>
@@ -619,9 +628,9 @@ export default function Bidguard() {
                     <p>Deterministic checks configured</p>
                   </div>
                   <div>
-                    <small>Human Reviews Logged</small>
+                    <small>Human Overrides</small>
                     <strong>{store.assessments.reduce((sum, a) => sum + Object.keys(a.reviews).length, 0)}</strong>
-                    <p>Officer overrides recorded</p>
+                    <p>Officer reviews logged</p>
                   </div>
                 </div>
 
@@ -629,7 +638,7 @@ export default function Bidguard() {
                   <div className="panel-heading">
                     <div>
                       <h2>All Procurement Assessments</h2>
-                      <p>Select an assessment to inspect compliance findings, evidence, and risk analysis</p>
+                      <p>Select an assessment to inspect compliance findings, evidence citations, and risk breakdown</p>
                     </div>
                     <span className="count">{store.assessments.length} cases</span>
                   </div>
@@ -680,10 +689,15 @@ export default function Bidguard() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <b>{itemSummary.compliancePercentage}%</b>
                                   <div className="risk-bar" style={{ width: 60, height: 6, margin: 0 }}>
-                                    <span style={{ width: `${itemSummary.compliancePercentage}%`, background: '#2c8862' }} />
+                                    <span
+                                      style={{
+                                        width: `${itemSummary.compliancePercentage}%`,
+                                        background: itemSummary.compliancePercentage >= 75 ? '#2c8862' : itemSummary.compliancePercentage >= 50 ? '#aa822d' : '#b95850'
+                                      }}
+                                    />
                                   </div>
                                 </div>
-                                <small>{itemSummary.pass} compliant</small>
+                                <small>{itemSummary.pass} Pass · {itemSummary.fail} Fail</small>
                               </td>
                               <td>
                                 <span
@@ -711,7 +725,7 @@ export default function Bidguard() {
                               </td>
                               <td>
                                 <button className="button primary">
-                                  Open Assessment <ChevronRight size={14} />
+                                  Open <ChevronRight size={14} />
                                 </button>
                               </td>
                             </tr>
@@ -806,7 +820,7 @@ export default function Bidguard() {
                       {busy && <p role="status">Extracting text, identifying page boundaries, and calculating SHA-256 fingerprint…</p>}
 
                       <div className="notice" style={{ marginTop: 24 }}>
-                        <b>Supported Clause Formats:</b> The extractor identifies explicit minimums (e.g. <code>Minimum experience: 5 years</code>, <code>Minimum turnover: 5 crore</code>, <code>Minimum local content: 50%</code>, <code>Minimum warranty: 24 months</code>) and statutory verification keywords (<code>GST</code>, <code>PAN</code>, <code>Udyam</code>).
+                        <b>Supported Clause Formats:</b> The extractor identifies explicit minimums (e.g. <code>Minimum experience: 5 years</code>, <code>Minimum turnover: 5 crore</code>, <code>Minimum local content: 50%</code>, <code>Minimum warranty: 24 months</code>) and statutory verification keywords (<code>GST</code>, <code>PAN</code>, <code>Udyam</code>, <code>OEM</code>).
                       </div>
                     </div>
                   </section>
@@ -841,7 +855,7 @@ export default function Bidguard() {
                                 <td><b>{req.id}</b></td>
                                 <td>{req.title}</td>
                                 <td>
-                                  <code>{req.kind === 'minimum' ? `>= ${req.minimum} ${req.unit}` : req.kind === 'portal' ? 'Portal Verification' : 'Manual Review'}</code>
+                                  <code>{req.kind === 'minimum' ? `>= ${req.minimum} ${req.unit}` : req.kind === 'portal' ? 'Portal Verification' : req.kind === 'expiry' ? `Valid until ${req.requiredDate}` : 'Manual Review'}</code>
                                 </td>
                                 <td><span className="count">{req.category}</span></td>
                                 <td>{req.weight} pts</td>
@@ -912,7 +926,7 @@ export default function Bidguard() {
                         ))}
                         {!wizardBidDocs.length && (
                           <div className="notice">
-                            No bidder documents uploaded yet. You can also run the assessment with empty documents and upload them later in the Evidence tab.
+                            No bidder documents uploaded yet. You can run the assessment and add files later in the Evidence tab.
                           </div>
                         )}
                       </div>
@@ -1010,7 +1024,7 @@ export default function Bidguard() {
                         <strong style={{ color: summary.compliancePercentage >= 70 ? '#2c8862' : '#b95850' }}>
                           {summary.compliancePercentage}%
                         </strong>
-                        <p>{summary.pass} of {summary.total} rules satisfied</p>
+                        <p>{summary.pass} Pass · {summary.fail} Fail · {summary.missing} Missing</p>
                       </div>
                       <div>
                         <small>Document Risk Index</small>
@@ -1036,7 +1050,7 @@ export default function Bidguard() {
                     </div>
 
                     {/* ATTENTION REQUIRED SUMMARY BANNER */}
-                    {(summary.fail > 0 || summary.review > 0 || summary.anomalies.length > 0) && (
+                    {(summary.fail > 0 || summary.review > 0 || summary.missing > 0 || summary.anomalies.length > 0) && (
                       <div
                         className="panel"
                         style={{
@@ -1052,8 +1066,9 @@ export default function Bidguard() {
                           <h3 style={{ margin: 0, fontSize: 16, color: '#8a6416' }}>Attention Required on this Assessment</h3>
                         </div>
                         <ul style={{ margin: 0, paddingLeft: 20, color: '#685422', fontSize: 13, lineHeight: 1.8 }}>
-                          {summary.fail > 0 && <li><b>{summary.fail} numeric requirement shortfalls:</b> Criteria thresholds not met.</li>}
-                          {summary.review > 0 && <li><b>{summary.review} items requiring officer review:</b> Statutory registries or manual clauses pending verification.</li>}
+                          {summary.fail > 0 && <li><b>{summary.fail} numeric requirement shortfalls:</b> Critical threshold requirements failed.</li>}
+                          {summary.missing > 0 && <li><b>{summary.missing} missing evidence clauses:</b> Required documentation was not found.</li>}
+                          {summary.review > 0 && <li><b>{summary.review} items requiring review:</b> Statutory registrations pending official portal check.</li>}
                           {summary.expectedDocuments.filter(d => d.mandatory && !d.found).length > 0 && (
                             <li>
                               <b>{summary.expectedDocuments.filter(d => d.mandatory && !d.found).length} missing mandatory documents:</b>{' '}
@@ -1061,7 +1076,7 @@ export default function Bidguard() {
                             </li>
                           )}
                           {summary.anomalies.filter(a => a.type === 'INCONSISTENCY').length > 0 && (
-                            <li><b>Cross-document discrepancies detected:</b> Different claims found across submitted documents.</li>
+                            <li><b>Cross-document discrepancies detected:</b> Contradictory claims detected across submitted documents.</li>
                           )}
                         </ul>
                       </div>
@@ -1169,7 +1184,7 @@ export default function Bidguard() {
                       <div className="panel-heading">
                         <div>
                           <h2>Compliance Matrix</h2>
-                          <p>Automated verification against tender clauses with page citations</p>
+                          <p>Deterministic verification against tender clauses with page citations</p>
                         </div>
                         <span className="count">{results.length} requirements</span>
                       </div>
@@ -1191,7 +1206,7 @@ export default function Bidguard() {
                           ))}
                         </select>
                         <select value={filter} onChange={e => setFilter(e.target.value)}>
-                          {['All requirements', ...statuses].map(s => (
+                          {['All requirements', ...allStatuses].map(s => (
                             <option key={s}>{s}</option>
                           ))}
                         </select>
@@ -1269,7 +1284,12 @@ export default function Bidguard() {
                           <Files size={20} />
                         </div>
                         <div className="evidence-body">
-                          <StatusBadge status={activeFinding.status} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <StatusBadge status={activeFinding.status} />
+                            <span style={{ fontSize: 11, color: '#7a8883', fontWeight: 600 }}>
+                              {Math.round(activeFinding.confidence * 100)}% Confidence
+                            </span>
+                          </div>
                           <p className="explanation">{activeFinding.reason}</p>
 
                           {/* Comparison Box */}
@@ -1279,6 +1299,10 @@ export default function Bidguard() {
                               <b>
                                 {activeFinding.requirement.minimum !== undefined
                                   ? `${activeFinding.requirement.minimum} ${activeFinding.requirement.unit}`
+                                  : activeFinding.requirement.maximum !== undefined
+                                  ? `≤ ${activeFinding.requirement.maximum} ${activeFinding.requirement.unit}`
+                                  : activeFinding.requirement.requiredDate !== undefined
+                                  ? `Valid until ${activeFinding.requirement.requiredDate}`
                                   : 'Statutory Verification'}
                               </b>
                             </div>
@@ -1287,10 +1311,26 @@ export default function Bidguard() {
                               <b className={activeFinding.status === 'Non-compliant' ? 'red-text' : ''}>
                                 {activeFinding.values.length
                                   ? `${activeFinding.values.join(' / ')} ${activeFinding.requirement.unit}`
+                                  : activeFinding.dates?.length
+                                  ? activeFinding.dates[0]
                                   : 'Unverified'}
                               </b>
                             </div>
                           </div>
+
+                          {/* Entity Extraction Details (e.g. PAN / GSTIN breakdown) */}
+                          {activeFinding.entityDetails && (
+                            <div style={{ background: '#f2f7f4', padding: '10px 14px', borderRadius: 6, marginBottom: 16, border: '1px solid #d5e5db' }}>
+                              <small style={{ color: '#2c8862', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                                EXTRACTED ENTITY DETAILS
+                              </small>
+                              {Object.entries(activeFinding.entityDetails).map(([k, v]) => (
+                                <div key={k} style={{ fontSize: 11, color: '#20322e', margin: '2px 0' }}>
+                                  <b>{k}:</b> {v}
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
                           {/* Rule Calculation */}
                           {activeFinding.calculation && (
@@ -1355,7 +1395,7 @@ export default function Bidguard() {
                                 value={reviewStatus}
                                 onChange={e => setReviewStatus(e.target.value as Status)}
                               >
-                                {statuses.map(s => (
+                                {allStatuses.map(s => (
                                   <option key={s}>{s}</option>
                                 ))}
                               </select>
@@ -1525,7 +1565,7 @@ export default function Bidguard() {
                     </div>
                     <div className="section-body" style={{ background: '#fafbf9', padding: 30 }}>
                       <div style={{ maxWidth: 800, margin: '0 auto', background: 'white', padding: 36, border: '1px solid #dfe6e2', borderRadius: 8 }}>
-                        <h1 style={{ fontSize: 24, margin: '0 0 8px' }}>BIDGUARD · Bid Compliance Assessment</h1>
+                        <h1 style={{ fontSize: 24, margin: '0 0 8px' }}>BIDGUARD AI · Bid Compliance Assessment</h1>
                         <p style={{ color: '#7a8883', margin: '0 0 20px', fontSize: 13 }}>
                           Tender: <b>{activeAssessment.name}</b> ({activeAssessment.id})<br />
                           Bidder: <b>{activeAssessment.bidder}</b><br />
@@ -1534,7 +1574,7 @@ export default function Bidguard() {
                         </p>
 
                         <div className="notice" style={{ margin: '16px 0 24px' }}>
-                          <b>Executive Summary:</b> Compliance Score: <b>{summary.compliancePercentage}%</b> ({summary.pass} compliant, {summary.fail} non-compliant, {summary.review} need review) · Document Risk Index: <b>{summary.riskScore}/100 ({summary.riskLevel})</b> · Final Officer Decision: <b>{activeAssessment.decision?.status || 'In Review'}</b>
+                          <b>Executive Summary:</b> Compliance Score: <b>{summary.compliancePercentage}%</b> ({summary.pass} Pass, {summary.fail} Fail, {summary.missing} Missing, {summary.review} Review) · Document Risk Index: <b>{summary.riskScore}/100 ({summary.riskLevel})</b> · Final Officer Decision: <b>{activeAssessment.decision?.status || 'In Review'}</b>
                         </div>
 
                         <h3 style={{ fontSize: 16, borderBottom: '1px solid #dfe6e2', paddingBottom: 8 }}>Compliance Findings & Citations</h3>
@@ -1606,10 +1646,10 @@ export default function Bidguard() {
                       className="button"
                       onClick={() => {
                         setStore(initialWorkspaceStore());
-                        setMessage('Reset to default sample assessment.');
+                        setMessage('Reset to default sample assessments (3 Indian PSU Bidders).');
                       }}
                     >
-                      <RotateCcw size={15} /> Reset Sample Data
+                      <RotateCcw size={15} /> Reset Sample Data (3 Bidders)
                     </button>
                   </div>
                 </div>
@@ -1618,6 +1658,72 @@ export default function Bidguard() {
           </section>
         </main>
       </div>
+
+      {/* MULTI-BIDDER COMPARISON MODAL */}
+      {modal === 'compare' && (
+        <Modal title="Multi-Bidder Comparative Evaluation" close={() => setModal(null)}>
+          <p className="muted" style={{ margin: '0 0 16px' }}>
+            Side-by-side compliance and risk assessment across competing Indian bidders for this tender.
+          </p>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>BIDDER NAME</th>
+                  <th>COMPLIANCE</th>
+                  <th>RISK INDEX</th>
+                  <th>PASS / FAIL</th>
+                  <th>DECISION</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {store.assessments.map(item => {
+                  const itemResults = evaluate(item.requirements, item.documents);
+                  const itemSummary = summarize(itemResults, item.documents);
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <b>{item.bidder}</b>
+                        <small>{item.id} · {item.documents.filter(d => d.role === 'bid').length} docs</small>
+                      </td>
+                      <td>
+                        <b style={{ color: itemSummary.compliancePercentage >= 70 ? '#2c8862' : '#b95850' }}>
+                          {itemSummary.compliancePercentage}%
+                        </b>
+                      </td>
+                      <td>
+                        <span className={`status ${itemSummary.riskLevel === 'Low' ? 'compliant' : itemSummary.riskLevel === 'Medium' ? 'needs-review' : 'non-compliant'}`}>
+                          {itemSummary.riskScore}/100 ({itemSummary.riskLevel})
+                        </span>
+                      </td>
+                      <td>
+                        <small>{itemSummary.pass} Pass · {itemSummary.fail} Fail · {itemSummary.missing} Missing</small>
+                      </td>
+                      <td>
+                        <span className="demo-badge">{item.decision?.status || item.status}</span>
+                      </td>
+                      <td>
+                        <button
+                          className="button primary"
+                          style={{ padding: '6px 12px', fontSize: 11 }}
+                          onClick={() => {
+                            setStore(prev => ({ ...prev, activeAssessmentId: item.id }));
+                            setSelectedReqId(item.requirements[0]?.id || 'REQ-001');
+                            setModal(null);
+                          }}
+                        >
+                          Switch Bidder
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
 
       {/* SOURCE VIEWER MODAL */}
       {source && (

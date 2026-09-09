@@ -44,9 +44,12 @@ test('threshold boundary passes, shortfall fails', () => {
   assert.equal(evaluate([experience], [doc('Experience: 4.99 years')])[0].status, 'Non-compliant');
 });
 
-test('missing, negative, wrong unit, ambiguous and negated evidence require review', () => {
+test('missing evidence returns Missing evidence status', () => {
+  assert.equal(evaluate([experience], [doc('Nothing supplied')])[0].status, 'Missing evidence');
+});
+
+test('negative, wrong unit, ambiguous and negated evidence require review', () => {
   for (const text of [
-    'Nothing supplied',
     'Experience: -7 years',
     'Experience: 7 months',
     'Experience: approximately 7 years',
@@ -65,7 +68,7 @@ test('conflicts never silently choose the favourable value', () => {
 });
 
 test('tender requirements are never bidder evidence', () => {
-  assert.equal(evaluate([experience], [doc('Experience: 7 years', 'tender')])[0].status, 'Needs review');
+  assert.equal(evaluate([experience], [doc('Experience: 7 years', 'tender')])[0].status, 'Missing evidence');
 });
 
 test('percentage and decimal units are preserved', () => {

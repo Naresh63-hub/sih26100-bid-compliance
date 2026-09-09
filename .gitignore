@@ -41,4 +41,5 @@ next-env.d.ts
 /backend/work/
 **/__pycache__/
 .pytest_cache/
+/scratch/
 !/\.env.example
