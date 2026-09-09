@@ -52,6 +52,7 @@ COPY --from=builder --chown=bidguard:nodejs /app/lib ./lib
 COPY --from=builder --chown=bidguard:nodejs /app/hooks ./hooks
 COPY --from=builder --chown=bidguard:nodejs /app/scripts ./scripts
 COPY --from=builder --chown=bidguard:nodejs /app/vite.config.ts ./
+COPY --from=builder --chown=bidguard:nodejs /app/.openai ./.openai
 COPY --from=builder --chown=bidguard:nodejs /app/tsconfig.json ./
 
 USER bidguard
