@@ -11,6 +11,8 @@ from app.application.assessments import scoped,bid_scoped,assessment_view,upload
 from app.domain.schemas import AssessmentCreate,BidCreate,ExtractRequest,RequirementEdit,AnalyzeRequest,ReviewCreate,DecisionCreate
 from app.infrastructure.reports import report_pdf
 from app.infrastructure.sample_documents import ROOT,SAMPLES,generate_samples
+from app.infrastructure.storage import get_storage_service, TENDER_BUCKET, BIDDER_BUCKET, REPORTS_BUCKET
+from app.infrastructure.database import uid
 from app.shared.config import settings
 router=APIRouter(prefix='/api/v1')
 DB=Annotated[Session,Depends(session)]
@@ -105,12 +107,19 @@ def document_text(assessment_id:str,document_id:str,db:DB,user:USER):
 def download_document(assessment_id:str,document_id:str,db:DB,user:USER):
     a=scoped(db,assessment_id,organization(db,user).id);doc=db.scalar(select(Document).where(Document.id==document_id,Document.assessment_id==a.id))
     if not doc:raise HTTPException(404,'Document not found.')
-    root=settings.storage_dir.resolve();path=(root/doc.stored_name).resolve()
-    if not path.is_relative_to(root) or not path.is_file():raise HTTPException(404,'Stored document unavailable.')
-    return FileResponse(path,filename=doc.name,media_type=doc.file_type,headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+    bucket = TENDER_BUCKET if doc.role == 'tender' else BIDDER_BUCKET
+    try:
+        content = get_storage_service().download_file(bucket, doc.stored_name)
+    except FileNotFoundError:
+        raise HTTPException(404,'Stored document unavailable.')
+    return Response(content,media_type=doc.file_type,headers={'Content-Disposition':f'attachment; filename="{doc.name}"','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
 @router.get('/assessments/{assessment_id}/report')
 def report(assessment_id:str,bid_id:str,db:DB,user:USER):
     a=scoped(db,assessment_id,organization(db,user).id);bid=bid_scoped(db,a,bid_id)
     if not bid.analyzed:raise HTTPException(409,'Run the assessment before exporting a report.')
     log(db,a,user.user_id,'REPORT_GENERATED',bid.id,'Evidence-grounded PDF report generated.');db.flush();dto=view(db,a);selected=next(b for b in dto['bids'] if b['id']==bid_id)
-    return Response(report_pdf(dto,selected),media_type='application/pdf',headers={'Content-Disposition':f'attachment; filename="BIDGUARD-{a.id[:8]}.pdf"','Cache-Control':'private, no-store'})
+    pdf_bytes = report_pdf(dto,selected)
+    report_id = uid()
+    report_path = f"{a.id}/{report_id}.pdf"
+    get_storage_service().upload_file(REPORTS_BUCKET, report_path, pdf_bytes, 'application/pdf')
+    return Response(pdf_bytes,media_type='application/pdf',headers={'Content-Disposition':f'attachment; filename="BIDGUARD-{a.id[:8]}.pdf"','Cache-Control':'private, no-store','X-Storage-Path':f'{REPORTS_BUCKET}/{report_path}'})

@@ -46,6 +46,7 @@ class Document(Base):
     role: Mapped[str] = mapped_column(String(20))
     file_type: Mapped[str] = mapped_column(String(60))
     stored_name: Mapped[str] = mapped_column(String(100))
+    storage_path: Mapped[str] = mapped_column(String(300), default='')
     sha256: Mapped[str] = mapped_column(String(64))
     page_count: Mapped[int] = mapped_column(Integer)
     warnings: Mapped[list] = mapped_column(JSON, default=list)

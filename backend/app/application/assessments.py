@@ -9,6 +9,7 @@ from app.infrastructure.providers import RuleBasedProvider, HttpLLMProvider
 from app.domain.schemas import RequirementData
 from app.domain.compliance import evaluate
 from app.domain.risk import risk_assessment, name_anomalies
+from app.infrastructure.storage import get_storage_service, TENDER_BUCKET, BIDDER_BUCKET, REPORTS_BUCKET
 from app.shared.config import settings
 
 def scoped(db: Session, assessment_id: str, organization_id: str) -> Assessment:
@@ -47,10 +48,16 @@ def upload_document(db: Session, assessment: Assessment, actor: str, filename: s
     parsed=parse_document(filename,content)
     if db.scalar(select(Document.id).where(Document.assessment_id==assessment.id,Document.bid_id==bid_id,Document.sha256==parsed.sha256)):
         raise ValueError('This exact document is already uploaded for this tender or bidder.')
-    document_id=uid();stored_name=document_id+('.pdf' if parsed.mime=='application/pdf' else '.txt')
-    target=settings.storage_dir/stored_name
-    target.write_bytes(content)
-    doc=Document(id=document_id,assessment_id=assessment.id,bid_id=bid_id,name=Path(filename.replace('\\','/')).name[:240],role=role,file_type=parsed.mime,stored_name=stored_name,sha256=parsed.sha256,page_count=len(parsed.pages),warnings=parsed.warnings)
+    document_id=uid();ext = '.pdf' if parsed.mime=='application/pdf' else '.txt'
+    if role == 'tender':
+        bucket = TENDER_BUCKET
+        rel_path = f"{assessment.id}/{document_id}{ext}"
+    else:
+        bucket = BIDDER_BUCKET
+        rel_path = f"{bid_id}/{document_id}{ext}"
+    
+    storage_path = get_storage_service().upload_file(bucket, rel_path, content, parsed.mime)
+    doc=Document(id=document_id,assessment_id=assessment.id,bid_id=bid_id,name=Path(filename.replace('\\','/')).name[:240],role=role,file_type=parsed.mime,stored_name=rel_path,storage_path=storage_path,sha256=parsed.sha256,page_count=len(parsed.pages),warnings=parsed.warnings)
     db.add(doc);db.flush()
     page_ids={}
     for number,text in enumerate(parsed.pages,1):
